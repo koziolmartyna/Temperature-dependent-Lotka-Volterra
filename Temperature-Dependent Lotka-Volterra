@@ -1,0 +1,169 @@
+#including an optimal temperature with an inhibitor effect at both high and low temps
+
+#Definition of the model with optimal temperature-dependent growth
+predator.prey.lotka.voltera2<-function(times,N0,params){
+  N1<-N0[1] #prey population
+  N2<-N0[2] #predator population
+  
+  #time-dependent temperature function (consistent increase)
+  T<-params$T_0+params$T_rate*times #linear increase in temperature
+  
+  #temperature-dependent intrinsic growth rate for prey with optimal temperature
+  #Using a quadratic function for growth rate with optimal temperature T_opt
+  r1<-params$a*T+params$b*(T^2)+params$c #added constant c so i can make b 0 and the equation becomes linear
+  
+  with(as.list(params),{
+    dN1.dt<-N1*(r1-alpha12*N2) #prey equation with r1
+    dN2.dt<-N2*(alpha21*N1-d2) #predator equation
+    return(list(c(dN1.dt,dN2.dt))) #return the rates of change
+  })
+}
+
+#parameters: Define temperature increase rate, optimal temperature, and more parameters
+params<-list(
+  a=0.02,
+  b=-0.0005,
+  c=0.1,
+  T_0=10,
+  T_rate=0.025, #T_rate defines temparature increase, this is the variable we are changing
+  d2=0.1,
+  alpha12=0.6,
+  alpha21=0.1
+)
+
+#initial conditions
+N0<-c(1,1) #initial prey and predator populations
+
+#time vector (t-values)
+t.values<-seq(0,500, by=1) #Time from 0 to 100 in steps of 1
+
+#solve the system of equations using 'ode' function from desolve package
+library(deSolve)
+predator.prey.out<-ode(N0,t.values,predator.prey.lotka.voltera2,params)
+
+#plot the results
+par(mfrow=c(1,2))
+plot(predator.prey.out[,1],predator.prey.out[,2],type = 'l',col='darkgoldenrod2',
+     xlab = 'Time',ylab = 'Abundance',main = 'Prey')
+plot(predator.prey.out[,1],predator.prey.out[,3],type = 'l',col='firebrick3',
+     xlab = 'Time',ylab = 'Abundance',main = 'Predator')
+
+#plot both species together with pink and blue colours
+par(mfrow=c(1,1))
+matplot(predator.prey.out[,c(2,3)],type = 'l',lty = 1,lwd = 2,
+        , ylab = 'Abundance',xlab = 'Years',col = c('darkgoldenrod2','firebrick3'))
+legend('topright',c('Prey','Predator'),lty = 1,lwd = 2,col = c('darkgoldenrod2','firebrick3'))
+
+# Add temperature axis on top
+t_ticks <- pretty(predator.prey.out[, 1])
+temp_ticks <- params$T_0 + params$T_rate * t_ticks
+axis(3, at = t_ticks, labels = round(temp_ticks, 1))
+mtext("Temperature (°C)", side = 3, line = 2)
+
+#define a vector of warming rates to simulate 
+warming_rates<- c(0,0.01,0.025,0.05,0.1,0.2)
+
+library(deSolve)
+
+#empty list to store results
+results_list<-list()
+
+results_df <- data.frame(
+  T_rate = numeric(),
+  prey_mean = numeric(),
+  pred_mean = numeric(),
+  prey_final = numeric(),
+  pred_final = numeric(),
+  prey_ci = numeric(),
+  pred_ci = numeric()
+)
+
+
+for (rate in warming_rates) {
+  #updatae parameters for each warming rate
+  params<-list(
+    a=0.02,
+    b=-0.0005,
+    c=0.1,
+    T_0=10,
+    T_rate=rate,
+    d2=0.1,
+    alpha12=0.6,
+    alpha21=0.1
+  )
+  
+
+#initial populations and time
+N0<-c(1,1)
+t.values<-seq(0,500,by=1)
+
+#run the model
+out<-ode(N0,t.values,predator.prey.lotka.voltera2,params)
+
+#extract final values
+prey_final<-tail(out[,2],1)
+pred_final<-tail(out[,3],1)
+
+#calculate mean abundance over time
+prey_mean<-mean(out[,2])
+pred_mean<-mean(out[,3])
+
+# Calculate 95% confidence intervals
+prey_sd <- sd(out[, 2])
+pred_sd <- sd(out[, 3])
+
+n <- length(out[, 1])  # number of time steps
+
+prey_se <- prey_sd / sqrt(n)
+pred_se <- pred_sd / sqrt(n)
+
+prey_ci <- 1.96 * prey_se
+pred_ci <- 1.96 * pred_se
+
+# Save to results data frame
+results_df <- rbind(results_df, data.frame(
+  T_rate = rate,
+  prey_mean = prey_mean,
+  pred_mean = pred_mean,
+  prey_final = prey_final,
+  pred_final = pred_final,
+  prey_ci = prey_ci,
+  pred_ci = pred_ci
+))
+}
+
+
+#check the results
+print(results_df)
+
+#plot mean prey and predator abundance vs warming rate 
+library(ggplot2)
+
+library(ggplot2)
+
+# Plot Mean Abundance with Confidence Intervals
+ggplot(results_df, aes(x = T_rate)) +
+  geom_line(aes(y = prey_mean, color = "Prey", group = "Prey"), size = 1.2) +
+  geom_ribbon(aes(ymin = prey_mean - prey_ci, ymax = prey_mean + prey_ci),
+              fill = "goldenrod2", alpha = 0.2, show.legend = FALSE) +
+  geom_line(aes(y = pred_mean, color = "Predator", group = "Predator"), size = 1.2) +
+  geom_ribbon(aes(ymin = pred_mean - pred_ci, ymax = pred_mean + pred_ci),
+              fill = "firebrick3", alpha = 0.2, show.legend = FALSE) +
+  scale_color_manual(
+    name = "Species",
+    values = c("Prey" = "goldenrod2", "Predator" = "firebrick3")
+  ) +
+  labs(x = "Warming Rate (°C/year)", y = "Mean Abundance") +
+  theme_classic() +
+  theme(legend.position = "right")
+
+#run a correlation test 
+cor.test(results_df$T_rate,results_df$prey_mean)
+cor.test(results_df$T_rate,results_df$pred_mean)
+
+#create linear models
+lm_prey<-lm(prey_mean~T_rate,data = results_df)
+summary(lm_prey)
+
+lm_pred<-lm(pred_mean~T_rate,data = results_df)
+summary(lm_pred)
